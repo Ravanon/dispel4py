@@ -237,11 +237,42 @@ class LockstepPE(GenericPE):
     Representation of a PE which consumes its input in lockstep. The inputs dictionary that is passed to 
     the :py:func:`~dispel4py.GenericPE.LockStepPE.process` function is guaranteed to contain one data item 
     from each of the connected input streams.
+
+    (Actually, in this case it is not, which is why the :py:func:`~dispel4py.GenericPE.LockStepPE.process` function gathers input until one input from every input stream has been retrieved.)
     '''
     
     def __init__(self):
         GenericPE.__init__(self)
         self.wrapper = 'lockstep'
+        self.input_queues = {}  # Stores inputs until all input connection interfaces are ready.
+
+    def preprocess(self):
+        """ Ensures that internal queues for every input are available. If this method is overridden, then it must be invoked by the overriding method to ensure that all queues are present. """
+        for interface in self.inputconnections:
+            self.input_queues[interface] = []
+
+    def process(self, inputs):
+        """ Collects input on all interfaces until one input on every interface has been received, then calls :py:func:`~dispel4py.GenericPE.LockStepPE.lockstep` on the first input of every interface. """
+        ready = True  # Used to determine if 'lockstep' can be invoked.
+        for interface in self.inputconnections:
+            # For every input interface, check for new inputs.
+            if interface in inputs:
+                self.input_queues[interface].append(inputs[interface])
+            if self.input_queues[interface] == []:
+                ready = False
+        if ready:
+            # Only execute the next step if all interfaces have received inputs since the last invocation of 'lockstep'.
+            locked_inputs = {}
+            for interface in self.inputconnections:
+                locked_inputs[interface] = self.input_queues[interface].pop(0)
+            return self.lockstep(locked_inputs)
+        else:
+            # Otherwise wait for more input before producing results.
+            return None
+
+    def lockstep(self, inputs):
+        """ This method executes a single processing pass using one unit of data from every input interface. All PEs based on LockstepPE must implement this method. """
+        pass
             
 class SourcePE(GenericPE):
     '''
